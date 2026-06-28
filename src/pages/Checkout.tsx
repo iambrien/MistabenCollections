@@ -10,12 +10,8 @@ import { useCurrency } from "@/stores/currencyStore";
 import { DeliveryZone } from "@/types";
 import { cn } from "@/lib/utils";
 
-const INTL_SHIPPING_USD = 7.8;
-
-// Approximate exchange rates to NGN (for converting $7.80 intl fee to selected currency)
-const USD_RATES: Record<string, number> = {
-  NGN: 1600, GHS: 15.5, USD: 1, GBP: 0.79, EUR: 0.92,
-};
+// International shipping flat rate: $7.80 USD → convert to NGN first, then to selected currency
+const INTL_SHIPPING_NGN = 7.8 * 1590; // $7.80 at ~1,590 NGN/USD = ~12,402 NGN
 
 export default function Checkout() {
   const navigate = useNavigate();
@@ -26,7 +22,6 @@ export default function Checkout() {
   const [zones, setZones] = useState<DeliveryZone[]>([]);
   const [form, setForm] = useState({ name: "", phone: "", address: "", notes: "" });
 
-  // Delivery
   const [isNigeria, setIsNigeria] = useState(true);
   const [selectedState, setSelectedState] = useState("");
   const [selectedZoneId, setSelectedZoneId] = useState("");
@@ -40,22 +35,12 @@ export default function Checkout() {
   const citiesForState = zones.filter(z => z.state === selectedState);
   const selectedZone = zones.find(z => z.id === selectedZoneId) ?? null;
 
-  // Delivery fee in display currency
-  const deliveryFeeInCurrency = (() => {
-    if (!isNigeria) {
-      // $7.80 converted to selected currency
-      const rate = USD_RATES[currency.code] ?? 1;
-      return INTL_SHIPPING_USD * rate;
-    }
-    if (!selectedZone) return 0;
-    // Zone rate is in NGN; convert to selected currency
-    const ngnToUsd = 1 / (USD_RATES["NGN"] ?? 1600);
-    const usdToCurrency = USD_RATES[currency.code] ?? 1;
-    if (currency.code === "NGN") return selectedZone.rate;
-    return selectedZone.rate * ngnToUsd * usdToCurrency;
-  })();
+  // Delivery fee: always stored/calculated in NGN, displayed via format() which converts automatically
+  const deliveryFeeNGN = isNigeria
+    ? (selectedZone?.rate ?? 0)
+    : INTL_SHIPPING_NGN;
 
-  const grandTotal = totalPrice + deliveryFeeInCurrency;
+  const grandTotalNGN = totalPrice + deliveryFeeNGN;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -77,7 +62,7 @@ export default function Checkout() {
       customer_phone: form.phone,
       customer_address: `${form.address} — ${deliveryInfo}`,
       notes: form.notes || null,
-      amount_paid: grandTotal,
+      amount_paid: grandTotalNGN, // stored in NGN
       status: "pending",
     }).select().single();
 
@@ -129,7 +114,6 @@ export default function Checkout() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Form */}
           <div className="order-2 lg:order-1 space-y-6">
-            {/* Contact Details */}
             <div>
               <h2 className="font-semibold text-lg mb-4">Your Details</h2>
               <div className="space-y-4">
@@ -152,7 +136,6 @@ export default function Checkout() {
             <div className="bg-card border border-border rounded-2xl p-5">
               <h2 className="font-semibold mb-4 flex items-center gap-2"><MapPin className="w-4 h-4 text-brand" /> Delivery Location</h2>
 
-              {/* Nigeria vs International toggle */}
               <div className="flex gap-2 mb-4">
                 <button onClick={() => { setIsNigeria(true); setSelectedState(""); setSelectedZoneId(""); }}
                   className={cn("flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-medium transition-all",
@@ -191,7 +174,7 @@ export default function Checkout() {
                   {selectedZone && (
                     <div className="flex items-center justify-between p-3 bg-brand/5 border border-brand/20 rounded-xl">
                       <span className="text-sm text-muted-foreground">Delivery to {selectedZone.city}</span>
-                      <span className="text-sm font-bold text-brand">{format(deliveryFeeInCurrency)}</span>
+                      <span className="text-sm font-bold text-brand">{format(selectedZone.rate)}</span>
                     </div>
                   )}
                 </div>
@@ -200,9 +183,9 @@ export default function Checkout() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm font-medium text-blue-800">International Shipping</p>
-                      <p className="text-xs text-blue-600 mt-0.5">Flat rate applies to all international orders</p>
+                      <p className="text-xs text-blue-600 mt-0.5">Flat rate — $7.80 USD equivalent</p>
                     </div>
-                    <span className="text-sm font-bold text-blue-700">{format(deliveryFeeInCurrency)}</span>
+                    <span className="text-sm font-bold text-blue-700">{format(INTL_SHIPPING_NGN)}</span>
                   </div>
                 </div>
               )}
@@ -241,26 +224,27 @@ export default function Checkout() {
                 </div>
               ))}
 
-              {/* Subtotal */}
               <div className="px-4 py-3 flex justify-between text-sm">
                 <span className="text-muted-foreground">Subtotal</span>
                 <span className="font-medium">{format(totalPrice)}</span>
               </div>
 
-              {/* Delivery */}
               <div className="px-4 py-3 flex justify-between text-sm">
                 <span className="text-muted-foreground">Delivery</span>
-                {(isNigeria && !selectedZoneId) || (!isNigeria && deliveryFeeInCurrency === 0) ? (
+                {(isNigeria && !selectedZoneId) ? (
                   <span className="text-muted-foreground italic text-xs">Select location</span>
                 ) : (
-                  <span className="font-medium text-brand">{format(deliveryFeeInCurrency)}</span>
+                  <span className="font-medium text-brand">{format(deliveryFeeNGN)}</span>
                 )}
               </div>
 
-              {/* Grand Total */}
+              <div className="px-4 py-3 text-xs text-muted-foreground italic">
+                Prices shown in {currency.label} ({currency.symbol})
+              </div>
+
               <div className="p-4 flex justify-between items-center">
                 <span className="font-bold">Total</span>
-                <span className="font-bold text-xl text-brand">{format(grandTotal)}</span>
+                <span className="font-bold text-xl text-brand">{format(grandTotalNGN)}</span>
               </div>
             </div>
           </div>

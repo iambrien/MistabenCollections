@@ -1,7 +1,9 @@
 import { Link } from "react-router-dom";
-import { ShoppingBag, Tag } from "lucide-react";
+import { ShoppingBag, Tag, ShoppingCart } from "lucide-react";
 import { Product } from "@/types";
 import { useCurrencyFormat } from "@/hooks/useCurrencyFormat";
+import { useCart } from "@/stores/cartStore";
+import { toast } from "sonner";
 
 interface ProductCardProps {
   product: Product;
@@ -9,15 +11,29 @@ interface ProductCardProps {
 
 export default function ProductCard({ product }: ProductCardProps) {
   const { format } = useCurrencyFormat();
+  const { addItem } = useCart();
+
   const price = product.has_variants
     ? product.variants && product.variants.length > 0
       ? Math.min(...product.variants.map((v) => v.price))
       : null
     : product.base_price;
 
+  const handleAddToCart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (product.has_variants) {
+      // Navigate to detail page for variant selection
+      window.location.href = `/products/${product.id}`;
+      return;
+    }
+    addItem(product, null, 1);
+    toast.success(`${product.title} added to cart!`);
+  };
+
   return (
     <Link to={`/products/${product.id}`} className="group block">
-      <div className="bg-card rounded-xl overflow-hidden border border-border hover:border-brand/30 hover:shadow-lg transition-all duration-300">
+      <div className="bg-card rounded-xl overflow-hidden border border-border hover:border-brand/30 hover:shadow-lg transition-all duration-300 flex flex-col">
         {/* Image */}
         <div className="relative aspect-[4/5] overflow-hidden bg-muted">
           {product.image_url ? (
@@ -34,20 +50,35 @@ export default function ProductCard({ product }: ProductCardProps) {
               Variants
             </div>
           )}
+          {/* Quick add overlay */}
+          <div className="absolute inset-x-0 bottom-0 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
+            <button onClick={handleAddToCart}
+              className="w-full py-3 bg-foreground text-white text-sm font-semibold flex items-center justify-center gap-2 hover:bg-brand transition-colors">
+              <ShoppingCart className="w-4 h-4" />
+              {product.has_variants ? "Choose Options" : "Add to Cart"}
+            </button>
+          </div>
         </div>
 
         {/* Info */}
-        <div className="p-4">
-          <h3 className="font-semibold text-foreground text-sm leading-tight line-clamp-2 mb-1 group-hover:text-brand transition-colors">
+        <div className="p-4 flex flex-col gap-2 flex-1">
+          <h3 className="font-semibold text-foreground text-sm leading-tight line-clamp-2 group-hover:text-brand transition-colors">
             {product.title}
           </h3>
-          {price !== null && price !== undefined ? (
-            <p className="text-brand font-bold text-base">
-              {product.has_variants ? "From " : ""}{format(price)}
-            </p>
-          ) : (
-            <p className="text-muted-foreground text-sm">Price varies</p>
-          )}
+          <div className="flex items-center justify-between mt-auto gap-2">
+            {price !== null && price !== undefined ? (
+              <p className="text-brand font-bold text-base">
+                {product.has_variants ? "From " : ""}{format(price)}
+              </p>
+            ) : (
+              <p className="text-muted-foreground text-sm">Price varies</p>
+            )}
+            <button onClick={handleAddToCart}
+              className="shrink-0 w-9 h-9 rounded-lg bg-foreground/5 hover:bg-brand hover:text-white flex items-center justify-center transition-all border border-border hover:border-brand"
+              title={product.has_variants ? "Choose Options" : "Add to Cart"}>
+              <ShoppingCart className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
     </Link>

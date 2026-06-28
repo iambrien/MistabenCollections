@@ -6,10 +6,20 @@ export interface Product {
   image_url: string | null;
   base_price: number | null;
   has_variants: boolean;
+  tags: string[];
   created_at: string;
   variants?: ProductVariant[];
   categories?: Category[];
   product_categories?: { category_id: string; categories: Category }[];
+  product_images?: ProductImage[];
+}
+
+export interface ProductImage {
+  id: string;
+  product_id: string;
+  image_url: string;
+  display_order: number;
+  created_at: string;
 }
 
 export interface ProductVariant {
@@ -33,7 +43,7 @@ export interface CartItem {
   product: Product;
   variant: ProductVariant | null;
   quantity: number;
-  price: number;
+  price: number; // stored in NGN
 }
 
 export interface Order {
@@ -63,7 +73,7 @@ export interface DeliveryZone {
   id: string;
   state: string;
   city: string;
-  rate: number;
+  rate: number; // in NGN
   is_active: boolean;
   created_at: string;
 }

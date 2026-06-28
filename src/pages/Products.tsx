@@ -45,11 +45,11 @@ export default function Products() {
   const [loading, setLoading] = useState(true);
 
   // Filter state
-  const [search, setSearch] = useState(searchParams.get("q") || "");
+  const [search, setSearch] = useState(searchParams.get("search") || searchParams.get("q") || "");
   const debouncedSearch = useDebounce(search, 300);
-  const [selectedCategories, setSelectedCategories] = useState<string[]>(
-    searchParams.get("category") ? [searchParams.get("category")!] : []
-  );
+  // Pre-select category by name (from navbar search click)
+  const [pendingCategoryName] = useState(searchParams.get("category") || "");
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [sort, setSort] = useState<SortKey>("newest");
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 10000]);
   const [maxPrice, setMaxPrice] = useState(10000);
@@ -67,7 +67,12 @@ export default function Products() {
       const prods = products || [];
       setAllProducts(prods);
       setCategories(cats || []);
-      if (prods.length > 0) {
+      // Resolve category name → id if coming from navbar
+    if (pendingCategoryName && cats) {
+      const matched = cats.find((c) => c.name.toLowerCase() === pendingCategoryName.toLowerCase());
+      if (matched) setSelectedCategories([matched.id]);
+    }
+    if (prods.length > 0) {
         const top = Math.max(...prods.map(getProductPrice));
         const ceiling = Math.ceil(top / 100) * 100 || 10000;
         setMaxPrice(ceiling);
@@ -103,7 +108,10 @@ export default function Products() {
     if (debouncedSearch.trim()) {
       const q = debouncedSearch.toLowerCase();
       list = list.filter(
-        (p) => p.title.toLowerCase().includes(q) || (p.description || "").toLowerCase().includes(q)
+        (p) =>
+          p.title.toLowerCase().includes(q) ||
+          (p.description || "").toLowerCase().includes(q) ||
+          (p.tags || []).some((t) => t.toLowerCase().includes(q))
       );
     }
 

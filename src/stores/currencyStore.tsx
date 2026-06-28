@@ -5,14 +5,17 @@ export interface Currency {
   symbol: string;
   label: string;
   locale: string;
+  rateFromNGN: number; // How many units of this currency = 1 NGN
 }
 
+// 2026 mid-market rates (NGN as base, prices stored in NGN)
+// 1 NGN = X foreign currency
 export const CURRENCIES: Currency[] = [
-  { code: "NGN", symbol: "₦", label: "Nigerian Naira", locale: "en-NG" },
-  { code: "GHS", symbol: "₵", label: "Ghana Cedis", locale: "en-GH" },
-  { code: "USD", symbol: "$", label: "US Dollar", locale: "en-US" },
-  { code: "GBP", symbol: "£", label: "British Pound", locale: "en-GB" },
-  { code: "EUR", symbol: "€", label: "Euro", locale: "de-DE" },
+  { code: "NGN", symbol: "₦", label: "Nigerian Naira",  locale: "en-NG", rateFromNGN: 1 },
+  { code: "GHS", symbol: "₵", label: "Ghana Cedis",     locale: "en-GH", rateFromNGN: 0.0068 },  // 1 NGN ≈ 0.0068 GHS  (1 GHS ≈ 147 NGN)
+  { code: "USD", symbol: "$", label: "US Dollar",        locale: "en-US", rateFromNGN: 0.00063 }, // 1 NGN ≈ $0.00063   (1 USD ≈ 1,590 NGN)
+  { code: "GBP", symbol: "£", label: "British Pound",    locale: "en-GB", rateFromNGN: 0.00049 }, // 1 NGN ≈ £0.00049   (1 GBP ≈ 2,040 NGN)
+  { code: "EUR", symbol: "€", label: "Euro",             locale: "de-DE", rateFromNGN: 0.00057 }, // 1 NGN ≈ €0.00057   (1 EUR ≈ 1,754 NGN)
 ];
 
 const STORAGE_KEY = "mistaben_currency";
@@ -20,7 +23,10 @@ const STORAGE_KEY = "mistaben_currency";
 interface CurrencyContextType {
   currency: Currency;
   setCurrency: (c: Currency) => void;
-  format: (amount: number) => string;
+  /** Convert an NGN amount to the selected currency and format it */
+  format: (amountNGN: number) => string;
+  /** Convert NGN amount to selected currency value (unformatted) */
+  convert: (amountNGN: number) => number;
 }
 
 const CurrencyContext = createContext<CurrencyContextType | null>(null);
@@ -44,21 +50,26 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     try { localStorage.setItem(STORAGE_KEY, c.code); } catch {}
   };
 
-  const format = (amount: number): string => {
+  const convert = (amountNGN: number): number => {
+    return amountNGN * currency.rateFromNGN;
+  };
+
+  const format = (amountNGN: number): string => {
+    const converted = convert(amountNGN);
     try {
       return new Intl.NumberFormat(currency.locale, {
         style: "currency",
         currency: currency.code,
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
-      }).format(amount);
+      }).format(converted);
     } catch {
-      return `${currency.symbol}${amount.toFixed(2)}`;
+      return `${currency.symbol}${converted.toFixed(2)}`;
     }
   };
 
   return (
-    <CurrencyContext.Provider value={{ currency, setCurrency, format }}>
+    <CurrencyContext.Provider value={{ currency, setCurrency, format, convert }}>
       {children}
     </CurrencyContext.Provider>
   );

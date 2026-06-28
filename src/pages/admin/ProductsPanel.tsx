@@ -1,12 +1,16 @@
 import { useEffect, useState, useRef } from "react";
-import { Plus, Search, Edit2, Trash2, X, Loader2, Package, Upload } from "lucide-react";
+import { Plus, Search, Edit2, Trash2, X, Loader2, Package, Upload, Image as ImageIcon, Tag } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { Product, ProductVariant, Category } from "@/types";
-import { formatPrice } from "@/lib/utils";
+import { Product, ProductVariant, Category, ProductImage } from "@/types";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
-const EMPTY_PRODUCT = { title: "", description: "", base_price: "", has_variants: false, is_active: true, image_url: "", categories: [] as string[] };
+const EMPTY_PRODUCT = {
+  title: "", description: "", base_price: "", has_variants: false,
+  is_active: true, image_url: "", categories: [] as string[], tags: [] as string[],
+};
 const EMPTY_VARIANT = { color: "", size: "", price: "", stock: "0" };
+const MAX_TAGS = 15;
 
 export default function ProductsPanel() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -19,10 +23,17 @@ export default function ProductsPanel() {
   const [variants, setVariants] = useState<Partial<ProductVariant>[]>([]);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [productImages, setProductImages] = useState<ProductImage[]>([]);
+  const [uploadingMulti, setUploadingMulti] = useState(false);
+  const [tagInput, setTagInput] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const multiFileRef = useRef<HTMLInputElement>(null);
 
   const fetchProducts = async () => {
-    const { data } = await supabase.from("products").select("*, variants:product_variants(*), product_categories(category_id)").order("created_at", { ascending: false });
+    const { data } = await supabase
+      .from("products")
+      .select("*, variants:product_variants(*), product_categories(category_id), product_images(*)")
+      .order("created_at", { ascending: false });
     setProducts(data || []);
     setLoading(false);
   };
@@ -32,15 +43,26 @@ export default function ProductsPanel() {
     supabase.from("categories").select("*").then(({ data }) => setCategories(data || []));
   }, []);
 
-  const openCreate = () => { setEditing(null); setForm(EMPTY_PRODUCT); setVariants([]); setShowModal(true); };
+  const openCreate = () => {
+    setEditing(null); setForm(EMPTY_PRODUCT); setVariants([]);
+    setProductImages([]); setTagInput(""); setShowModal(true);
+  };
+
   const openEdit = (p: Product) => {
     setEditing(p);
     const cats = p.product_categories?.map((pc) => pc.category_id) || [];
-    setForm({ title: p.title, description: p.description || "", base_price: p.base_price?.toString() || "", has_variants: p.has_variants, is_active: p.is_active, image_url: p.image_url || "", categories: cats });
+    setForm({
+      title: p.title, description: p.description || "", base_price: p.base_price?.toString() || "",
+      has_variants: p.has_variants, is_active: p.is_active, image_url: p.image_url || "",
+      categories: cats, tags: p.tags || [],
+    });
     setVariants(p.variants || []);
+    setProductImages(p.product_images || []);
+    setTagInput("");
     setShowModal(true);
   };
 
+  // Single main image upload
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     setUploading(true);
@@ -50,13 +72,65 @@ export default function ProductsPanel() {
     const { data: { publicUrl } } = supabase.storage.from("product-images").getPublicUrl(path);
     setForm((prev) => ({ ...prev, image_url: publicUrl }));
     setUploading(false);
-    toast.success("Image uploaded");
+    toast.success("Main image uploaded");
+  };
+
+  // Multiple gallery images upload
+  const handleMultiImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const remaining = 15 - productImages.length;
+    const toUpload = files.slice(0, remaining);
+    if (files.length > remaining) toast.info(`Only ${remaining} more images allowed. Uploading first ${remaining}.`);
+    setUploadingMulti(true);
+    const uploaded: ProductImage[] = [];
+    for (const file of toUpload) {
+      const path = `products/gallery/${Date.now()}-${Math.random().toString(36).slice(2)}-${file.name}`;
+      const { error } = await supabase.storage.from("product-images").upload(path, file);
+      if (error) { toast.error(`Failed to upload ${file.name}`); continue; }
+      const { data: { publicUrl } } = supabase.storage.from("product-images").getPublicUrl(path);
+      uploaded.push({ id: `temp-${Date.now()}-${Math.random()}`, product_id: "", image_url: publicUrl, display_order: productImages.length + uploaded.length, created_at: "" });
+    }
+    setProductImages((prev) => [...prev, ...uploaded]);
+    setUploadingMulti(false);
+    if (uploaded.length) toast.success(`${uploaded.length} image${uploaded.length > 1 ? "s" : ""} uploaded`);
+    if (multiFileRef.current) multiFileRef.current.value = "";
+  };
+
+  const removeGalleryImage = async (img: ProductImage) => {
+    if (img.id.startsWith("temp-")) {
+      setProductImages((prev) => prev.filter((i) => i.id !== img.id));
+      return;
+    }
+    await supabase.from("product_images").delete().eq("id", img.id);
+    setProductImages((prev) => prev.filter((i) => i.id !== img.id));
+    toast.success("Image removed");
+  };
+
+  // Tags
+  const addTag = () => {
+    const tag = tagInput.trim().toLowerCase();
+    if (!tag) return;
+    if (form.tags.length >= MAX_TAGS) { toast.error(`Maximum ${MAX_TAGS} tags allowed`); return; }
+    if (form.tags.includes(tag)) { toast.error("Tag already added"); return; }
+    setForm((p) => ({ ...p, tags: [...p.tags, tag] }));
+    setTagInput("");
+  };
+  const removeTag = (tag: string) => setForm((p) => ({ ...p, tags: p.tags.filter((t) => t !== tag) }));
+  const handleTagKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag(); }
   };
 
   const handleSave = async () => {
     if (!form.title) { toast.error("Product title required"); return; }
     setSaving(true);
-    const productData = { title: form.title, description: form.description || null, base_price: form.base_price ? parseFloat(form.base_price) : null, has_variants: form.has_variants, is_active: form.is_active, image_url: form.image_url || null };
+    const productData = {
+      title: form.title, description: form.description || null,
+      base_price: form.base_price ? parseFloat(form.base_price) : null,
+      has_variants: form.has_variants, is_active: form.is_active,
+      image_url: form.image_url || null,
+      tags: form.tags,
+    };
 
     let productId = editing?.id;
     if (editing) {
@@ -69,18 +143,28 @@ export default function ProductsPanel() {
     }
 
     if (productId) {
-      // Update categories
+      // Categories
       await supabase.from("product_categories").delete().eq("product_id", productId);
       if (form.categories.length > 0) {
         await supabase.from("product_categories").insert(form.categories.map((cid) => ({ product_id: productId, category_id: cid })));
       }
-      // Update variants
+      // Variants
       if (form.has_variants) {
         if (editing) await supabase.from("product_variants").delete().eq("product_id", productId);
         const validVariants = variants.filter((v) => v.price);
         if (validVariants.length > 0) {
-          await supabase.from("product_variants").insert(validVariants.map((v) => ({ product_id: productId, color: v.color || null, size: v.size || null, price: parseFloat(String(v.price)), stock: parseInt(String(v.stock || 0)) })));
+          await supabase.from("product_variants").insert(validVariants.map((v) => ({
+            product_id: productId, color: v.color || null, size: v.size || null,
+            price: parseFloat(String(v.price)), stock: parseInt(String(v.stock || 0)),
+          })));
         }
+      }
+      // Gallery images — save newly added (temp) images
+      const newImages = productImages.filter((img) => img.id.startsWith("temp-"));
+      if (newImages.length > 0) {
+        await supabase.from("product_images").insert(newImages.map((img, idx) => ({
+          product_id: productId, image_url: img.image_url, display_order: idx,
+        })));
       }
     }
 
@@ -95,7 +179,10 @@ export default function ProductsPanel() {
     fetchProducts();
   };
 
-  const filtered = products.filter((p) => p.title.toLowerCase().includes(search.toLowerCase()));
+  const filtered = products.filter((p) =>
+    p.title.toLowerCase().includes(search.toLowerCase()) ||
+    (p.tags || []).some((t) => t.toLowerCase().includes(search.toLowerCase()))
+  );
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -106,10 +193,9 @@ export default function ProductsPanel() {
         </button>
       </div>
 
-      {/* Search */}
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search products..."
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search products or tags..."
           className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand" />
       </div>
 
@@ -124,13 +210,25 @@ export default function ProductsPanel() {
             {filtered.map((p) => (
               <div key={p.id} className="flex items-center gap-3 px-4 py-3">
                 <div className="w-12 h-12 rounded-lg overflow-hidden bg-muted shrink-0">
-                  {p.image_url ? <img src={p.image_url} alt={p.title} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><Package className="w-5 h-5 text-muted-foreground/40" /></div>}
+                  {p.image_url ? <img src={p.image_url} alt={p.title} className="w-full h-full object-cover" />
+                    : <div className="w-full h-full flex items-center justify-center"><Package className="w-5 h-5 text-muted-foreground/40" /></div>}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-sm truncate">{p.title}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    {p.has_variants ? <span className="text-xs text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded">{p.variants?.length || 0} variants</span>
-                      : p.base_price ? <span className="text-xs text-brand font-medium">{formatPrice(p.base_price)}</span> : null}
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    {p.has_variants
+                      ? <span className="text-xs text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded">{p.variants?.length || 0} variants</span>
+                      : p.base_price ? <span className="text-xs text-brand font-medium">₦{p.base_price.toLocaleString()}</span> : null}
+                    {(p.product_images?.length || 0) > 0 && (
+                      <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                        <ImageIcon className="w-3 h-3" />{p.product_images?.length}
+                      </span>
+                    )}
+                    {(p.tags || []).length > 0 && (
+                      <span className="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                        <Tag className="w-3 h-3" />{p.tags?.length}
+                      </span>
+                    )}
                     <span className={`text-xs px-1.5 py-0.5 rounded ${p.is_active ? "bg-green-50 text-green-600" : "bg-gray-100 text-gray-500"}`}>{p.is_active ? "Active" : "Hidden"}</span>
                   </div>
                 </div>
@@ -146,21 +244,23 @@ export default function ProductsPanel() {
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+        <div className="fixed inset-0 z-50 flex items-start justify-center px-4 py-6 overflow-y-auto">
           <div className="absolute inset-0 bg-black/50" onClick={() => setShowModal(false)} />
-          <div className="relative z-10 bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border sticky top-0 bg-white">
+          <div className="relative z-10 bg-white rounded-2xl w-full max-w-2xl shadow-2xl">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border sticky top-0 bg-white rounded-t-2xl z-10">
               <h2 className="font-semibold">{editing ? "Edit Product" : "New Product"}</h2>
               <button onClick={() => setShowModal(false)} className="p-1.5 rounded-lg hover:bg-muted transition-colors"><X className="w-4 h-4" /></button>
             </div>
-            <div className="p-5 space-y-4">
-              {/* Image */}
+
+            <div className="p-5 space-y-5">
+              {/* Main image */}
               <div>
-                <label className="block text-sm font-medium mb-1.5">Product Image</label>
+                <label className="block text-sm font-medium mb-1.5">Main Image (cover)</label>
                 <div className="flex gap-3 items-start">
-                  {form.image_url && <img src={form.image_url} alt="" className="w-16 h-16 rounded-lg object-cover border border-border" />}
+                  {form.image_url && <img src={form.image_url} alt="" className="w-16 h-16 rounded-lg object-cover border border-border shrink-0" />}
                   <div className="flex-1 space-y-2">
-                    <input value={form.image_url} onChange={(e) => setForm((p) => ({ ...p, image_url: e.target.value }))} placeholder="Paste image URL..."
+                    <input value={form.image_url} onChange={(e) => setForm((p) => ({ ...p, image_url: e.target.value }))}
+                      placeholder="Paste image URL..."
                       className="w-full px-3 py-2 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-brand/30" />
                     <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
                       className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
@@ -171,17 +271,52 @@ export default function ProductsPanel() {
                   </div>
                 </div>
               </div>
+
+              {/* Gallery images */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium">Gallery Images</label>
+                  <span className="text-xs text-muted-foreground">{productImages.length}/15</span>
+                </div>
+                <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 mb-3">
+                  {productImages.map((img) => (
+                    <div key={img.id} className="relative aspect-square rounded-lg overflow-hidden bg-muted group">
+                      <img src={img.image_url} alt="" className="w-full h-full object-cover" />
+                      <button onClick={() => removeGalleryImage(img)}
+                        className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <X className="w-4 h-4 text-white" />
+                      </button>
+                    </div>
+                  ))}
+                  {productImages.length < 15 && (
+                    <button type="button" onClick={() => multiFileRef.current?.click()} disabled={uploadingMulti}
+                      className="aspect-square rounded-lg border-2 border-dashed border-border hover:border-brand/50 flex flex-col items-center justify-center gap-1 transition-colors">
+                      {uploadingMulti ? <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                        : <><ImageIcon className="w-5 h-5 text-muted-foreground" /><span className="text-xs text-muted-foreground">Add</span></>}
+                    </button>
+                  )}
+                </div>
+                <input ref={multiFileRef} type="file" accept="image/*" multiple className="hidden" onChange={handleMultiImageUpload} />
+                <p className="text-xs text-muted-foreground">Upload up to 15 gallery images. Click image to remove.</p>
+              </div>
+
+              {/* Title */}
               <div>
                 <label className="block text-sm font-medium mb-1.5">Title *</label>
                 <input value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} placeholder="Product title"
                   className="w-full px-3 py-2.5 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-brand/30" />
               </div>
+
+              {/* Description */}
               <div>
                 <label className="block text-sm font-medium mb-1.5">Description</label>
-                <textarea value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} rows={3} placeholder="Product description..."
+                <textarea value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
+                  rows={3} placeholder="Product description..."
                   className="w-full px-3 py-2.5 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 resize-none" />
               </div>
-              <div className="flex items-center gap-4">
+
+              {/* Toggles */}
+              <div className="flex items-center gap-6">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input type="checkbox" checked={form.has_variants} onChange={(e) => setForm((p) => ({ ...p, has_variants: e.target.checked }))} className="w-4 h-4 accent-brand" />
                   <span className="text-sm font-medium">Has Variants</span>
@@ -191,50 +326,95 @@ export default function ProductsPanel() {
                   <span className="text-sm font-medium">Active</span>
                 </label>
               </div>
+
+              {/* Base price */}
               {!form.has_variants && (
                 <div>
-                  <label className="block text-sm font-medium mb-1.5">Base Price (GHS)</label>
-                  <input type="number" value={form.base_price} onChange={(e) => setForm((p) => ({ ...p, base_price: e.target.value }))} placeholder="0.00" min="0" step="0.01"
+                  <label className="block text-sm font-medium mb-1.5">Base Price (₦ NGN)</label>
+                  <input type="number" value={form.base_price} onChange={(e) => setForm((p) => ({ ...p, base_price: e.target.value }))}
+                    placeholder="0.00" min="0" step="0.01"
                     className="w-full px-3 py-2.5 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-brand/30" />
+                  <p className="text-xs text-muted-foreground mt-1">Enter price in Nigerian Naira (₦). It will auto-convert for customers in other currencies.</p>
                 </div>
               )}
+
+              {/* Categories */}
               {categories.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium mb-1.5">Categories</label>
                   <div className="flex flex-wrap gap-2">
                     {categories.map((cat) => (
-                      <button key={cat.id} type="button" onClick={() => setForm((p) => ({ ...p, categories: p.categories.includes(cat.id) ? p.categories.filter((c) => c !== cat.id) : [...p.categories, cat.id] }))}
-                        className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${form.categories.includes(cat.id) ? "bg-brand text-white border-brand" : "border-border hover:border-brand"}`}>
+                      <button key={cat.id} type="button"
+                        onClick={() => setForm((p) => ({ ...p, categories: p.categories.includes(cat.id) ? p.categories.filter((c) => c !== cat.id) : [...p.categories, cat.id] }))}
+                        className={cn("px-3 py-1.5 rounded-full text-xs font-medium border transition-all",
+                          form.categories.includes(cat.id) ? "bg-brand text-white border-brand" : "border-border hover:border-brand")}>
                         {cat.name}
                       </button>
                     ))}
                   </div>
                 </div>
               )}
+
+              {/* Tags */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-sm font-medium flex items-center gap-1.5"><Tag className="w-3.5 h-3.5" /> Search Tags</label>
+                  <span className="text-xs text-muted-foreground">{form.tags.length}/{MAX_TAGS}</span>
+                </div>
+                <div className="flex gap-2 mb-2">
+                  <input value={tagInput} onChange={(e) => setTagInput(e.target.value)} onKeyDown={handleTagKeyDown}
+                    placeholder="e.g. red dress, summer, casual (Enter to add)"
+                    disabled={form.tags.length >= MAX_TAGS}
+                    className="flex-1 px-3 py-2 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 disabled:opacity-50" />
+                  <button type="button" onClick={addTag} disabled={form.tags.length >= MAX_TAGS}
+                    className="px-3 py-2 rounded-lg bg-brand text-white text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity">
+                    Add
+                  </button>
+                </div>
+                {form.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {form.tags.map((tag) => (
+                      <span key={tag} className="flex items-center gap-1 px-2.5 py-1 bg-muted rounded-full text-xs font-medium">
+                        #{tag}
+                        <button onClick={() => removeTag(tag)} className="text-muted-foreground hover:text-red-500 transition-colors"><X className="w-3 h-3" /></button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground mt-1.5">Tags help customers find products via search. Press Enter or comma to add.</p>
+              </div>
+
+              {/* Variants */}
               {form.has_variants && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <label className="text-sm font-medium">Variants</label>
-                    <button onClick={() => setVariants((v) => [...v, { ...EMPTY_VARIANT }])} className="text-xs text-brand hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add</button>
+                    <button onClick={() => setVariants((v) => [...v, { ...EMPTY_VARIANT }])} className="text-xs text-brand hover:underline flex items-center gap-1"><Plus className="w-3 h-3" /> Add Variant</button>
                   </div>
                   <div className="space-y-2">
                     {variants.map((v, i) => (
-                      <div key={i} className="grid grid-cols-4 gap-2 items-center">
-                        {["color", "size", "price", "stock"].map((field) => (
-                          <input key={field} placeholder={field.charAt(0).toUpperCase() + field.slice(1)} value={String((v as Record<string, unknown>)[field] ?? "")}
-                            onChange={(e) => setVariants((prev) => prev.map((item, idx) => idx === i ? { ...item, [field]: e.target.value } : item))}
-                            className="w-full px-2 py-2 rounded-lg border border-border text-xs focus:outline-none focus:ring-1 focus:ring-brand/30" />
+                      <div key={i} className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-center p-3 bg-muted/40 rounded-xl">
+                        {(["color", "size", "price", "stock"] as const).map((field) => (
+                          <div key={field}>
+                            <label className="text-xs text-muted-foreground mb-1 block capitalize">{field}{field === "price" ? " (₦)" : ""}</label>
+                            <input placeholder={field === "price" ? "e.g. 25000" : field} value={String((v as Record<string, unknown>)[field] ?? "")}
+                              onChange={(e) => setVariants((prev) => prev.map((item, idx) => idx === i ? { ...item, [field]: e.target.value } : item))}
+                              className="w-full px-2 py-1.5 rounded-lg border border-border text-xs focus:outline-none focus:ring-1 focus:ring-brand/30 bg-white" />
+                          </div>
                         ))}
-                        <button onClick={() => setVariants((prev) => prev.filter((_, idx) => idx !== i))} className="col-span-4 text-xs text-red-500 hover:underline text-left">Remove</button>
+                        <button onClick={() => setVariants((prev) => prev.filter((_, idx) => idx !== i))} className="col-span-2 sm:col-span-4 text-xs text-red-500 hover:underline text-right">Remove</button>
                       </div>
                     ))}
+                    {variants.length === 0 && <p className="text-xs text-muted-foreground text-center py-3">No variants yet. Click "Add Variant" to start.</p>}
                   </div>
                 </div>
               )}
             </div>
-            <div className="px-5 py-4 border-t border-border flex gap-3 sticky bottom-0 bg-white">
+
+            <div className="px-5 py-4 border-t border-border flex gap-3 sticky bottom-0 bg-white rounded-b-2xl">
               <button onClick={() => setShowModal(false)} className="flex-1 py-2.5 rounded-xl border border-border text-sm font-medium hover:bg-muted transition-colors">Cancel</button>
-              <button onClick={handleSave} disabled={saving} className="flex-1 brand-gradient text-white py-2.5 rounded-xl text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2">
+              <button onClick={handleSave} disabled={saving}
+                className="flex-1 brand-gradient text-white py-2.5 rounded-xl text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2">
                 {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</> : "Save Product"}
               </button>
             </div>
