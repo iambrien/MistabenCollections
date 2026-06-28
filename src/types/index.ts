@@ -59,6 +59,15 @@ export interface OrderItem {
   variant_info: string | null;
 }
 
+export interface DeliveryZone {
+  id: string;
+  state: string;
+  city: string;
+  rate: number;
+  is_active: boolean;
+  created_at: string;
+}
+
 export interface AdminSettings {
   adminEmail: string;
   whatsappNumber: string;

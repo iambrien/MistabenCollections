@@ -24,6 +24,7 @@ import OrdersPanel from "./pages/admin/OrdersPanel";
 import CategoriesPanel from "./pages/admin/CategoriesPanel";
 import UsersPanel from "./pages/admin/UsersPanel";
 import Settings from "./pages/admin/Settings";
+import DeliveryPanel from "./pages/admin/DeliveryPanel";
 
 const queryClient = new QueryClient();
 
@@ -54,6 +55,7 @@ const App = () => (
                   <Route path="orders" element={<OrdersPanel />} />
                   <Route path="categories" element={<CategoriesPanel />} />
                   <Route path="users" element={<UsersPanel />} />
+                  <Route path="delivery" element={<DeliveryPanel />} />
                   <Route path="settings" element={<Settings />} />
                 </Route>
 
