@@ -4,6 +4,8 @@ import { Product } from "@/types";
 import { useCurrencyFormat } from "@/hooks/useCurrencyFormat";
 import { useCart } from "@/stores/cartStore";
 import { toast } from "sonner";
+import { supabase } from "@/lib/supabase";
+import { useEffect, useState } from "react";
 
 interface ProductCardProps {
   product: Product;
@@ -12,6 +14,22 @@ interface ProductCardProps {
 export default function ProductCard({ product }: ProductCardProps) {
   const { format } = useCurrencyFormat();
   const { addItem } = useCart();
+  const [firstGalleryImg, setFirstGalleryImg] = useState<string | null>(null);
+
+  // If no main image, try to grab the first gallery image
+  useEffect(() => {
+    if (product.image_url) return;
+    supabase
+      .from("product_images")
+      .select("image_url")
+      .eq("product_id", product.id)
+      .order("display_order")
+      .limit(1)
+      .single()
+      .then(({ data }) => { if (data) setFirstGalleryImg(data.image_url); });
+  }, [product.id, product.image_url]);
+
+  const displayImage = product.image_url || firstGalleryImg;
 
   const price = product.has_variants
     ? product.variants && product.variants.length > 0
@@ -36,8 +54,8 @@ export default function ProductCard({ product }: ProductCardProps) {
       <div className="bg-card rounded-xl overflow-hidden border border-border hover:border-brand/30 hover:shadow-lg transition-all duration-300 flex flex-col">
         {/* Image */}
         <div className="relative aspect-[4/5] overflow-hidden bg-muted">
-          {product.image_url ? (
-            <img src={product.image_url} alt={product.title}
+          {displayImage ? (
+            <img src={displayImage} alt={product.title}
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-muted-foreground">

@@ -26,10 +26,12 @@ export default function ProductDetail() {
 
   useEffect(() => {
     if (!id) return;
+    setLoading(true);
     Promise.all([
-      supabase.from("products").select("*, variants:product_variants(*)").eq("id", id).single(),
+      supabase.from("products").select("*, variants:product_variants(*)").eq("id", id).eq("is_active", true).single(),
       supabase.from("product_images").select("*").eq("product_id", id).order("display_order"),
-    ]).then(([{ data: prod }, { data: imgs }]) => {
+    ]).then(([{ data: prod, error: prodError }, { data: imgs }]) => {
+      if (prodError) console.error("Product fetch error:", prodError);
       setProduct(prod);
       setGalleryImages(imgs || []);
       setLoading(false);
