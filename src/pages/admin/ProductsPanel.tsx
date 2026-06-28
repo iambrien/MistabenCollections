@@ -16,15 +16,13 @@ async function uploadImageFile(file: File): Promise<string> {
   const ext = file.name.split(".").pop() || "jpg";
   const path = `products/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
 
-  // Use fetch + blob for reliable upload
-  const arrayBuffer = await file.arrayBuffer();
-  const blob = new Blob([arrayBuffer], { type: file.type });
-
+  // Upload File directly — fastest method, no extra conversion
   const { error } = await supabase.storage
     .from("product-images")
-    .upload(path, blob, {
+    .upload(path, file, {
       contentType: file.type,
       upsert: false,
+      cacheControl: "3600",
     });
 
   if (error) throw new Error(error.message);

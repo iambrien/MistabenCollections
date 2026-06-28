@@ -57,17 +57,34 @@ export default function Checkout() {
       ? `${selectedZone?.city}, ${selectedZone?.state}, Nigeria`
       : "International Delivery";
 
-    const { data: order, error: orderError } = await supabase.from("orders").insert({
+    // Insert order then fetch it back separately — avoids 401 when anon RLS blocks returning rows inline
+    const { error: orderError } = await supabase.from("orders").insert({
       customer_name: form.name,
       customer_phone: form.phone,
       customer_address: `${form.address} — ${deliveryInfo}`,
       notes: form.notes || null,
       amount_paid: grandTotalNGN, // stored in NGN
       status: "pending",
-    }).select().single();
+    });
 
-    if (orderError || !order) {
+    if (orderError) {
       toast.error("Failed to place order. Please try again.");
+      setLoading(false);
+      return;
+    }
+
+    // Fetch the order we just created by matching customer details + timestamp
+    const { data: order } = await supabase
+      .from("orders")
+      .select("id")
+      .eq("customer_phone", form.phone)
+      .eq("customer_name", form.name)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (!order) {
+      toast.error("Order placed but could not retrieve ID. Check your orders.");
       setLoading(false);
       return;
     }
