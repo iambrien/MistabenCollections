@@ -1,28 +1,52 @@
 import { useEffect, useState } from "react";
-import { Package, ShoppingBag, Tag, TrendingUp, Clock, CheckCircle } from "lucide-react";
+import { Package, ShoppingBag, Tag, TrendingUp, Clock, AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Order } from "@/types";
 import { formatPrice, formatDate, getStatusColor } from "@/lib/utils";
 import { Link } from "react-router-dom";
 
 interface Stats { products: number; orders: number; categories: number; revenue: number; }
+interface LowStockVariant { id: string; product_title: string; color: string | null; size: string | null; stock: number; }
 
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats>({ products: 0, orders: 0, categories: 0, revenue: 0 });
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
+  const [lowStock, setLowStock] = useState<LowStockVariant[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
-      const [{ count: products }, { count: orders }, { count: categories }, { data: ordersData }] = await Promise.all([
+      const [
+        { count: products },
+        { count: orders },
+        { count: categories },
+        { data: ordersData },
+        { data: variantsData },
+      ] = await Promise.all([
         supabase.from("products").select("*", { count: "exact", head: true }),
         supabase.from("orders").select("*", { count: "exact", head: true }),
         supabase.from("categories").select("*", { count: "exact", head: true }),
         supabase.from("orders").select("*").order("created_at", { ascending: false }).limit(5),
+        supabase
+          .from("product_variants")
+          .select("id, product_id, color, size, stock, products(title)")
+          .lt("stock", 5)
+          .order("stock", { ascending: true })
+          .limit(10),
       ]);
+
       const revenue = (ordersData || []).reduce((s, o) => s + (o.amount_paid ?? 0), 0);
       setStats({ products: products ?? 0, orders: orders ?? 0, categories: categories ?? 0, revenue });
       setRecentOrders(ordersData || []);
+
+      const mapped: LowStockVariant[] = (variantsData || []).map((v) => ({
+        id: v.id,
+        product_title: (v.products as { title?: string } | null)?.title ?? "Unknown Product",
+        color: v.color,
+        size: v.size,
+        stock: v.stock ?? 0,
+      }));
+      setLowStock(mapped);
       setLoading(false);
     };
     load();
@@ -41,6 +65,48 @@ export default function Dashboard() {
         <h1 className="text-2xl font-bold">Dashboard</h1>
         <p className="text-muted-foreground text-sm mt-0.5">Welcome back! Here's your store overview.</p>
       </div>
+
+      {/* Low Stock Warning Banner */}
+      {!loading && lowStock.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-amber-200/70">
+            <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-4 h-4 text-amber-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-amber-900">
+                {lowStock.length} variant{lowStock.length > 1 ? "s" : ""} running low on stock
+              </p>
+              <p className="text-xs text-amber-700 mt-0.5">Restock these soon to avoid selling out</p>
+            </div>
+            <Link
+              to="/admin/products?filter=low-stock"
+              className="shrink-0 text-xs font-semibold text-amber-700 bg-amber-100 hover:bg-amber-200 px-3 py-1.5 rounded-lg transition-colors"
+            >
+              View All
+            </Link>
+          </div>
+          <div className="divide-y divide-amber-100/80">
+            {lowStock.map((v) => (
+              <div key={v.id} className="flex items-center justify-between px-4 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-amber-900 truncate">{v.product_title}</p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    {[v.color, v.size].filter(Boolean).join(" · ") || "Default variant"}
+                  </p>
+                </div>
+                <span className={`shrink-0 ml-3 text-xs font-bold px-2.5 py-1 rounded-full border ${
+                  v.stock === 0
+                    ? "bg-red-100 text-red-700 border-red-200"
+                    : "bg-amber-100 text-amber-700 border-amber-200"
+                }`}>
+                  {v.stock === 0 ? "Out of stock" : `${v.stock} left`}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

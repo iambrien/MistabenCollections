@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Search, Eye, X, MessageCircle } from "lucide-react";
+import { Search, Eye, X, MessageCircle, Package } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Order, OrderItem } from "@/types";
 import { formatPrice, formatDate, getStatusColor } from "@/lib/utils";
@@ -8,12 +8,16 @@ import { toast } from "sonner";
 const STATUSES = ["pending", "processing", "shipped", "delivered", "cancelled"];
 const UNREAD_KEY = "mistaben_unread_orders";
 
+// Statuses that mean the order is fulfilled — reduce stock when entering these
+const FULFIL_STATUSES = new Set(["shipped", "delivered"]);
+
 export default function OrdersPanel() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
   const settings = JSON.parse(localStorage.getItem("mistaben_settings") || "{}");
 
   const fetchOrders = async () => {
@@ -53,13 +57,47 @@ export default function OrdersPanel() {
     setOrderItems(data || []);
   };
 
-  const updateStatus = async (orderId: string, status: string) => {
-    const { error } = await supabase.from("orders").update({ status }).eq("id", orderId);
-    if (error) { toast.error("Failed to update status"); return; }
-    toast.success("Status updated");
-    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status } : o)));
+  /** Decrement stock for each variant in the order when fulfilling */
+  const decrementStock = async (items: OrderItem[]) => {
+    for (const item of items) {
+      if (!item.variant_id) continue;
+      // Use rpc-style update: fetch current stock then decrement
+      const { data: variant } = await supabase
+        .from("product_variants")
+        .select("stock")
+        .eq("id", item.variant_id)
+        .single();
+      if (!variant) continue;
+      const newStock = Math.max(0, (variant.stock ?? 0) - item.quantity);
+      await supabase
+        .from("product_variants")
+        .update({ stock: newStock })
+        .eq("id", item.variant_id);
+    }
+  };
+
+  const updateStatus = async (orderId: string, newStatus: string) => {
+    const prevOrder = orders.find((o) => o.id === orderId);
+    const prevStatus = prevOrder?.status ?? "";
+
+    setUpdatingStatus(true);
+    const { error } = await supabase.from("orders").update({ status: newStatus }).eq("id", orderId);
+    if (error) { toast.error("Failed to update status"); setUpdatingStatus(false); return; }
+
+    // Reduce stock only when transitioning INTO a fulfilment status for the first time
+    const wasAlreadyFulfilled = FULFIL_STATUSES.has(prevStatus);
+    const isNowFulfilled = FULFIL_STATUSES.has(newStatus);
+    if (isNowFulfilled && !wasAlreadyFulfilled && orderItems.length > 0) {
+      await decrementStock(orderItems);
+      toast.success(`Status updated to "${newStatus}" — stock deducted`);
+    } else {
+      toast.success("Status updated");
+    }
+
+    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o)));
     if (selectedOrder?.id === orderId)
-      setSelectedOrder((prev) => (prev ? { ...prev, status } : null));
+      setSelectedOrder((prev) => (prev ? { ...prev, status: newStatus } : null));
+    setUpdatingStatus(false);
   };
 
   const filtered = orders.filter((o) =>
@@ -91,12 +129,14 @@ export default function OrdersPanel() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-16 text-center text-muted-foreground">
+            <Package className="w-10 h-10 mx-auto mb-2 opacity-30" />
             <p className="text-sm">No orders found</p>
           </div>
         ) : (
           <div className="divide-y divide-border">
             {filtered.map((order) => (
-              <div key={order.id}
+              <div
+                key={order.id}
                 className="flex items-center justify-between px-4 py-3.5 hover:bg-muted/30 transition-colors cursor-pointer"
                 onClick={() => openOrder(order)}
               >
@@ -161,12 +201,14 @@ export default function OrdersPanel() {
                 </div>
               )}
 
+              {/* Status Update */}
               <div>
-                <p className="text-sm font-semibold mb-2">Update Status</p>
+                <p className="text-sm font-semibold mb-1.5">Update Status</p>
                 <select
                   value={selectedOrder.status}
+                  disabled={updatingStatus}
                   onChange={(e) => updateStatus(selectedOrder.id, e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-brand/30"
+                  className="w-full px-3 py-2 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 disabled:opacity-60"
                 >
                   {STATUSES.map((s) => (
                     <option key={s} value={s}>
@@ -174,23 +216,34 @@ export default function OrdersPanel() {
                     </option>
                   ))}
                 </select>
+                {(selectedOrder.status === "shipped" || selectedOrder.status === "delivered") && (
+                  <p className="text-xs text-green-600 mt-1.5 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+                    Stock has been deducted for fulfilled variants
+                  </p>
+                )}
               </div>
 
+              {/* Order Items */}
               <div className="border border-border rounded-xl overflow-hidden">
                 <div className="px-3 py-2 bg-muted/50 border-b border-border">
                   <p className="text-xs font-semibold uppercase tracking-wide">Items</p>
                 </div>
-                {orderItems.map((item) => (
-                  <div key={item.id} className="flex justify-between items-center px-3 py-2.5 border-b border-border last:border-0">
-                    <div>
-                      <p className="text-sm font-medium">{item.product_title}</p>
-                      {item.variant_info && <p className="text-xs text-muted-foreground">{item.variant_info}</p>}
-                      <p className="text-xs text-muted-foreground">×{item.quantity}</p>
+                {orderItems.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-muted-foreground">No items found</div>
+                ) : (
+                  orderItems.map((item) => (
+                    <div key={item.id} className="flex justify-between items-center px-3 py-2.5 border-b border-border last:border-0">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate">{item.product_title}</p>
+                        {item.variant_info && <p className="text-xs text-muted-foreground">{item.variant_info}</p>}
+                        <p className="text-xs text-muted-foreground">×{item.quantity}</p>
+                      </div>
+                      <p className="text-sm font-bold text-brand ml-3 shrink-0">{formatPrice(item.price * item.quantity)}</p>
                     </div>
-                    <p className="text-sm font-bold text-brand">{formatPrice(item.price * item.quantity)}</p>
-                  </div>
-                ))}
-                <div className="px-3 py-2.5 flex justify-between">
+                  ))
+                )}
+                <div className="px-3 py-2.5 flex justify-between border-t border-border bg-muted/20">
                   <span className="font-bold text-sm">Total</span>
                   <span className="font-bold text-brand">{formatPrice(selectedOrder.amount_paid ?? 0)}</span>
                 </div>
