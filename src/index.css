@@ -139,4 +139,19 @@
   .animate-fade-in {
     animation: fade-in 0.2s ease-out;
   }
+  @keyframes bounce-once {
+    0%, 100% { transform: translateY(0) scale(1); }
+    30% { transform: translateY(-4px) scale(1.15); }
+    60% { transform: translateY(1px) scale(0.95); }
+  }
+  .animate-bounce-once {
+    animation: bounce-once 0.5s ease-out;
+  }
+  @keyframes slide-down {
+    from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .animate-slide-down {
+    animation: slide-down 0.18s ease-out;
+  }
 }

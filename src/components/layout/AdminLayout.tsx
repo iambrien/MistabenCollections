@@ -3,6 +3,8 @@ import { Navigate, Outlet } from "react-router-dom";
 import { Menu, Download, X } from "lucide-react";
 import AdminSidebar from "./AdminSidebar";
 import { useAuth } from "@/stores/authStore";
+import { useAdminNotifications } from "@/hooks/useAdminNotifications";
+import NotificationDropdown from "@/components/features/NotificationDropdown";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -15,10 +17,12 @@ export default function AdminLayout() {
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+
+  const { notifications, unreadCount, markAllRead, markRead, clearAll } = useAdminNotifications();
 
   // Capture the install prompt event
   useEffect(() => {
-    // Check if already running as PWA
     if (window.matchMedia("(display-mode: standalone)").matches) {
       setIsInstalled(true);
       return;
@@ -105,12 +109,25 @@ export default function AdminLayout() {
           </div>
         )}
 
-        {/* Mobile top bar */}
-        <header className="lg:hidden flex items-center gap-3 px-4 py-3 bg-white border-b border-border shrink-0">
-          <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-lg hover:bg-muted transition-colors">
+        {/* Top header bar — notification bell lives here */}
+        <header className="flex items-center gap-3 px-4 py-3 bg-white border-b border-border shrink-0">
+          {/* Mobile hamburger */}
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="lg:hidden p-2 rounded-lg hover:bg-muted transition-colors"
+          >
             <Menu className="w-5 h-5" />
           </button>
-          <span className="font-bold text-lg flex-1">MISTA<span className="text-brand">BEN</span> Admin</span>
+
+          {/* Mobile title */}
+          <span className="font-bold text-lg flex-1 lg:hidden">
+            MISTA<span className="text-brand">BEN</span> Admin
+          </span>
+
+          {/* Desktop spacer */}
+          <div className="hidden lg:flex flex-1" />
+
+          {/* Install button (mobile) */}
           {installPrompt && !isInstalled && (
             <button
               onClick={handleInstall}
@@ -118,9 +135,21 @@ export default function AdminLayout() {
               title="Install app"
             >
               <Download className="w-3.5 h-3.5" />
-              Install
+              <span className="hidden sm:inline">Install</span>
             </button>
           )}
+
+          {/* Notification bell */}
+          <NotificationDropdown
+            notifications={notifications}
+            unreadCount={unreadCount}
+            open={notifOpen}
+            onToggle={() => setNotifOpen((v) => !v)}
+            onMarkAllRead={markAllRead}
+            onMarkRead={markRead}
+            onClearAll={clearAll}
+            onClose={() => setNotifOpen(false)}
+          />
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
