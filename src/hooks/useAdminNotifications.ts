@@ -5,6 +5,8 @@ import { Order } from "@/types";
 const STORAGE_KEY = "mistaben_last_seen_order_ts";
 const UNREAD_KEY = "mistaben_unread_orders";
 const POLL_INTERVAL = 6000; // 6 seconds
+const SOUND_COOLDOWN_MS = 60000; // minimum 60s between sounds
+const MAX_SOUNDS_PER_SESSION = 2; // maximum sounds to play
 
 export interface Notification {
   id: string;
@@ -15,25 +17,37 @@ export interface Notification {
   read: boolean;
 }
 
+let lastSoundTime = 0;
+let soundsPlayedThisSession = 0;
+
 function playNotificationSound() {
+  const now = Date.now();
+  // Hard limit: max 2 sounds per session, with at least 60s between them
+  if (soundsPlayedThisSession >= MAX_SOUNDS_PER_SESSION) return;
+  if (now - lastSoundTime < SOUND_COOLDOWN_MS && lastSoundTime !== 0) return;
+
+  lastSoundTime = now;
+  soundsPlayedThisSession++;
+
   try {
     const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-    // Two-tone chime
-    const times = [0, 0.18];
-    const freqs = [1046, 1318];
-    times.forEach((t, i) => {
+    // Two-tone chime — plays exactly ONCE, total duration ~0.65s
+    const tones = [{ t: 0, f: 1046 }, { t: 0.2, f: 1318 }];
+    tones.forEach(({ t, f }) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.type = "sine";
-      osc.frequency.setValueAtTime(freqs[i], ctx.currentTime + t);
+      osc.frequency.setValueAtTime(f, ctx.currentTime + t);
       gain.gain.setValueAtTime(0, ctx.currentTime + t);
-      gain.gain.linearRampToValueAtTime(0.25, ctx.currentTime + t + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.4);
+      gain.gain.linearRampToValueAtTime(0.22, ctx.currentTime + t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.35);
       osc.start(ctx.currentTime + t);
-      osc.stop(ctx.currentTime + t + 0.45);
+      osc.stop(ctx.currentTime + t + 0.38);
     });
+    // Close context after sound finishes to free resources
+    setTimeout(() => { try { ctx.close(); } catch (_) {} }, 800);
   } catch (_) {
     // AudioContext may be blocked; ignore
   }
@@ -41,12 +55,17 @@ function playNotificationSound() {
 
 function setBadge(count: number) {
   try {
+    // App Badge API (works when app is open)
     if ("setAppBadge" in navigator) {
       if (count > 0) {
         (navigator as Navigator & { setAppBadge: (n: number) => void }).setAppBadge(count);
       } else {
         (navigator as Navigator & { clearAppBadge: () => void }).clearAppBadge();
       }
+    }
+    // Also update via service worker (works when app is closed/backgrounded)
+    if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({ type: "SET_BADGE", count });
     }
   } catch (_) {}
 }

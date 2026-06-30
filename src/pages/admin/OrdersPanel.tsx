@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Search, Eye, X, MessageCircle, Package } from "lucide-react";
+import { Search, Eye, X, MessageCircle, Package, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Order, OrderItem } from "@/types";
 import { formatPrice, formatDate, getStatusColor } from "@/lib/utils";
@@ -100,6 +100,16 @@ export default function OrdersPanel() {
     setUpdatingStatus(false);
   };
 
+  const deleteOrder = async (orderId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("Delete this order permanently? This cannot be undone.")) return;
+    const { error } = await supabase.from("orders").delete().eq("id", orderId);
+    if (error) { toast.error("Failed to delete order"); return; }
+    setOrders((prev) => prev.filter((o) => o.id !== orderId));
+    if (selectedOrder?.id === orderId) setSelectedOrder(null);
+    toast.success("Order deleted");
+  };
+
   const filtered = orders.filter((o) =>
     o.customer_name.toLowerCase().includes(search.toLowerCase()) ||
     o.customer_phone.includes(search) ||
@@ -156,6 +166,13 @@ export default function OrdersPanel() {
                     className="p-2 rounded-lg hover:bg-muted transition-colors"
                   >
                     <Eye className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                  <button
+                    onClick={(e) => deleteOrder(order.id, e)}
+                    className="p-2 rounded-lg hover:bg-red-50 transition-colors"
+                    title="Delete order"
+                  >
+                    <Trash2 className="w-4 h-4 text-red-400 hover:text-red-600" />
                   </button>
                 </div>
               </div>

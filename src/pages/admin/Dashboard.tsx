@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Package, ShoppingBag, Tag, TrendingUp, Clock, AlertTriangle } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import { Order } from "@/types";
 import { formatPrice, formatDate, getStatusColor } from "@/lib/utils";
@@ -56,7 +57,7 @@ export default function Dashboard() {
     { icon: Package, label: "Products", value: stats.products, color: "bg-blue-50 text-blue-600", link: "/admin/products" },
     { icon: ShoppingBag, label: "Orders", value: stats.orders, color: "bg-green-50 text-green-600", link: "/admin/orders" },
     { icon: Tag, label: "Categories", value: stats.categories, color: "bg-purple-50 text-purple-600", link: "/admin/categories" },
-    { icon: TrendingUp, label: "Revenue", value: formatPrice(stats.revenue), color: "bg-red-50 text-brand", link: "/admin/orders" },
+    { icon: TrendingUp, label: "Revenue", value: formatPrice(stats.revenue), color: "bg-red-50 text-brand", link: "/admin/orders", small: true },
   ];
 
   return (
@@ -110,12 +111,12 @@ export default function Dashboard() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {statCards.map(({ icon: Icon, label, value, color, link }) => (
+        {statCards.map(({ icon: Icon, label, value, color, link, small }) => (
           <Link key={label} to={link} className="bg-card rounded-xl border border-border p-5 hover:shadow-md transition-shadow">
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${color}`}>
               <Icon className="w-5 h-5" />
             </div>
-            <p className="text-2xl font-bold">{loading ? "—" : value}</p>
+            <p className={cn("font-bold leading-tight", small ? "text-lg sm:text-xl" : "text-2xl")}>{loading ? "—" : value}</p>
             <p className="text-sm text-muted-foreground mt-0.5">{label}</p>
           </Link>
         ))}

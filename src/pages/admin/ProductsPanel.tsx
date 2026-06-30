@@ -49,13 +49,32 @@ export default function ProductsPanel() {
   const galleryFileRef = useRef<HTMLInputElement>(null);
 
   const fetchProducts = async () => {
-    const { data, error } = await supabase
+    // Fast initial load: fetch products without heavy joins first
+    const { data: prods, error } = await supabase
       .from("products")
-      .select("*, variants:product_variants(*), product_categories(category_id), product_images(*)")
+      .select("id, title, description, is_active, image_url, base_price, has_variants, created_at, tags")
       .order("created_at", { ascending: false });
     if (error) console.error("Fetch error:", error);
-    setProducts(data || []);
+    const productList = (prods || []) as Product[];
+    setProducts(productList);
     setLoading(false);
+
+    // Then enrich with variants, categories, images in background
+    if (productList.length === 0) return;
+    const ids = productList.map((p) => p.id);
+    const [{ data: variants }, { data: pcs }, { data: imgs }] = await Promise.all([
+      supabase.from("product_variants").select("*").in("product_id", ids),
+      supabase.from("product_categories").select("product_id, category_id").in("product_id", ids),
+      supabase.from("product_images").select("*").in("product_id", ids).order("display_order"),
+    ]);
+    setProducts((prev) =>
+      prev.map((p) => ({
+        ...p,
+        variants: (variants || []).filter((v) => v.product_id === p.id),
+        product_categories: (pcs || []).filter((pc) => pc.product_id === p.id),
+        product_images: (imgs || []).filter((img) => img.product_id === p.id),
+      }))
+    );
   };
 
   useEffect(() => {
