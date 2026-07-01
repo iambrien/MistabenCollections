@@ -25,6 +25,7 @@ import CategoriesPanel from "./pages/admin/CategoriesPanel";
 import UsersPanel from "./pages/admin/UsersPanel";
 import Settings from "./pages/admin/Settings";
 import DeliveryPanel from "./pages/admin/DeliveryPanel";
+import BankAccountsPanel from "./pages/admin/BankAccountsPanel";
 
 const queryClient = new QueryClient();
 
@@ -56,6 +57,7 @@ const App = () => (
                   <Route path="categories" element={<CategoriesPanel />} />
                   <Route path="users" element={<UsersPanel />} />
                   <Route path="delivery" element={<DeliveryPanel />} />
+                  <Route path="payments" element={<BankAccountsPanel />} />
                   <Route path="settings" element={<Settings />} />
                 </Route>
 

@@ -4,9 +4,9 @@ import { Order } from "@/types";
 
 const STORAGE_KEY = "mistaben_last_seen_order_ts";
 const UNREAD_KEY = "mistaben_unread_orders";
-const POLL_INTERVAL = 6000; // 6 seconds
-const SOUND_COOLDOWN_MS = 60000; // minimum 60s between sounds
-const MAX_SOUNDS_PER_SESSION = 2; // maximum sounds to play
+const POLL_INTERVAL = 6000;
+const SOUND_COOLDOWN_MS = 60000;
+const MAX_SOUNDS_PER_SESSION = 2;
 
 export interface Notification {
   id: string;
@@ -22,17 +22,13 @@ let soundsPlayedThisSession = 0;
 
 function playNotificationSound() {
   const now = Date.now();
-  // Hard limit: max 2 sounds per session, with at least 60s between them
   if (soundsPlayedThisSession >= MAX_SOUNDS_PER_SESSION) return;
   if (now - lastSoundTime < SOUND_COOLDOWN_MS && lastSoundTime !== 0) return;
-
   lastSoundTime = now;
   soundsPlayedThisSession++;
-
   try {
     const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-    // Two-tone chime — plays exactly ONCE, total duration ~0.65s
-    const tones = [{ t: 0, f: 1046 }, { t: 0.2, f: 1318 }];
+    const tones = [{ t: 0, f: 1046 }, { t: 0.22, f: 1318 }];
     tones.forEach(({ t, f }) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -46,16 +42,12 @@ function playNotificationSound() {
       osc.start(ctx.currentTime + t);
       osc.stop(ctx.currentTime + t + 0.38);
     });
-    // Close context after sound finishes to free resources
-    setTimeout(() => { try { ctx.close(); } catch (_) {} }, 800);
-  } catch (_) {
-    // AudioContext may be blocked; ignore
-  }
+    setTimeout(() => { try { ctx.close(); } catch (_) {} }, 900);
+  } catch (_) {}
 }
 
 function setBadge(count: number) {
   try {
-    // App Badge API (works when app is open)
     if ("setAppBadge" in navigator) {
       if (count > 0) {
         (navigator as Navigator & { setAppBadge: (n: number) => void }).setAppBadge(count);
@@ -63,9 +55,37 @@ function setBadge(count: number) {
         (navigator as Navigator & { clearAppBadge: () => void }).clearAppBadge();
       }
     }
-    // Also update via service worker (works when app is closed/backgrounded)
     if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
       navigator.serviceWorker.controller.postMessage({ type: "SET_BADGE", count });
+    }
+  } catch (_) {}
+}
+
+/** Ask SW to show a system-level notification (works even when user is in another app) */
+function showSystemNotification(order: { id: string; customerName: string; amountPaid: number | null }) {
+  const shortId = order.id.slice(0, 8).toUpperCase();
+  try {
+    // Route 1: via Service Worker (shown even when tab is backgrounded / different app open)
+    if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({
+        type: "SHOW_ORDER_NOTIFICATION",
+        orderId: order.id,
+        orderShortId: shortId,
+        customerName: order.customerName,
+        amount: order.amountPaid,
+      });
+      return; // SW handles it — most reliable for cross-app visibility
+    }
+
+    // Route 2: Notification API directly (fallback when SW not yet controlling)
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification("🛍️ New Order — Mistaben Collections", {
+        body: `Order #${shortId} from ${order.customerName}${order.amountPaid ? " · ₦" + Number(order.amountPaid).toLocaleString() : ""}`,
+        icon: "/admin-icon-512.png",
+        badge: "/admin-icon-512.png",
+        tag: `order-${order.id}`,
+        requireInteraction: true,
+      } as NotificationOptions);
     }
   } catch (_) {}
 }
@@ -74,15 +94,11 @@ function loadStoredNotifications(): Notification[] {
   try {
     const raw = localStorage.getItem(UNREAD_KEY);
     return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
 function saveNotifications(notifs: Notification[]) {
-  // Keep last 30 only
-  const trimmed = notifs.slice(0, 30);
-  localStorage.setItem(UNREAD_KEY, JSON.stringify(trimmed));
+  localStorage.setItem(UNREAD_KEY, JSON.stringify(notifs.slice(0, 50)));
 }
 
 export function useAdminNotifications() {
@@ -105,8 +121,7 @@ export function useAdminNotifications() {
     setNotifications((prev) => {
       const updated = prev.map((n) => n.id === id ? { ...n, read: true } : n);
       saveNotifications(updated);
-      const newUnread = updated.filter((n) => !n.read).length;
-      setBadge(newUnread);
+      setBadge(updated.filter((n) => !n.read).length);
       return updated;
     });
   }, []);
@@ -126,7 +141,7 @@ export function useAdminNotifications() {
 
     if (error || !data || data.length === 0) return;
 
-    // On first poll, just record the timestamp — don't surface old orders as new
+    // First poll: just record timestamp, don't surface old orders
     if (isFirstPollRef.current) {
       isFirstPollRef.current = false;
       const latest = data[data.length - 1].created_at;
@@ -147,6 +162,11 @@ export function useAdminNotifications() {
     if (newNotifs.length > 0) {
       playNotificationSound();
 
+      // Show a system notification for each new order (unique tag = no duplicates)
+      newNotifs.forEach((n) =>
+        showSystemNotification({ id: n.orderId, customerName: n.customerName, amountPaid: n.amountPaid })
+      );
+
       setNotifications((prev) => {
         const existingIds = new Set(prev.map((n) => n.id));
         const fresh = newNotifs.filter((n) => !existingIds.has(n.id));
@@ -157,37 +177,23 @@ export function useAdminNotifications() {
         return merged;
       });
 
-      // Also trigger browser Notification if permission granted
-      if (Notification.permission === "granted") {
-        const plural = newNotifs.length > 1 ? `${newNotifs.length} new orders` : `Order from ${newNotifs[0].customerName}`;
-        new Notification("Mistaben Collections", {
-          body: `You just received ${plural}!`,
-          icon: "/admin-icon-512.png",
-          badge: "/admin-icon-512.png",
-          tag: "new-order",
-        });
-      }
-
       const latest = data[data.length - 1].created_at;
       lastTsRef.current = latest;
       localStorage.setItem(STORAGE_KEY, latest);
     }
   }, []);
 
-  // Request notification permission
+  // Request notification permission on mount + sync badge
   useEffect(() => {
     if ("Notification" in window && Notification.permission === "default") {
       Notification.requestPermission();
     }
-    // Update badge on mount with current unread count
     const stored = loadStoredNotifications();
-    const unread = stored.filter((n) => !n.read).length;
-    setBadge(unread);
+    setBadge(stored.filter((n) => !n.read).length);
   }, []);
 
   // Polling loop
   useEffect(() => {
-    // Immediate first poll
     poll();
     const interval = setInterval(poll, POLL_INTERVAL);
     return () => clearInterval(interval);

@@ -8,7 +8,6 @@ import { Order } from "@/types";
 import { formatDate } from "@/lib/utils";
 import { useCurrencyFormat } from "@/hooks/useCurrencyFormat";
 
-// Admin WhatsApp number - read from settings
 function getAdminWhatsapp(): string {
   try {
     const s = JSON.parse(localStorage.getItem("mistaben_settings") || "{}");
@@ -23,8 +22,7 @@ function buildAdminWhatsappMessage(order: Order, items: Order["order_items"], fo
   const itemLines = (items || [])
     .map((item) => `  • ${item.product_title}${item.variant_info ? ` (${item.variant_info})` : ""} × ${item.quantity}`)
     .join("\n");
-
-  const msg =
+  return encodeURIComponent(
     `🛍️ *NEW ORDER — Mistaben Collections*\n` +
     `Order #${orderNum}\n\n` +
     `👤 *Customer:* ${order.customer_name}\n` +
@@ -32,9 +30,8 @@ function buildAdminWhatsappMessage(order: Order, items: Order["order_items"], fo
     `📍 *Address:* ${order.customer_address}\n\n` +
     `🛒 *Items:*\n${itemLines || "  (no items)"}\n\n` +
     `💰 *Total: ${formattedTotal}*\n\n` +
-    `Reply to confirm delivery. ✅`;
-
-  return encodeURIComponent(msg);
+    `Reply to confirm delivery. ✅`
+  );
 }
 
 export default function OrderConfirmation() {
@@ -46,28 +43,18 @@ export default function OrderConfirmation() {
 
   useEffect(() => {
     if (!orderId) return;
-    supabase
-      .from("orders")
-      .select("*, order_items(*)")
-      .eq("id", orderId)
-      .single()
-      .then(({ data }) => {
-        if (data) setOrder(data);
-      });
+    supabase.from("orders").select("*, order_items(*)").eq("id", orderId).single()
+      .then(({ data }) => { if (data) setOrder(data); });
   }, [orderId]);
 
-  // Auto-open WhatsApp notification to admin once order is loaded
+  // Auto-open WhatsApp once
   useEffect(() => {
     if (!order || waOpened) return;
     const adminNum = getAdminWhatsapp();
     if (!adminNum) return;
-
     const msg = buildAdminWhatsappMessage(order, order.order_items, format(order.amount_paid ?? 0));
-    const waUrl = `https://wa.me/${adminNum}?text=${msg}`;
-
-    // Brief delay so user sees confirmation first
     const t = setTimeout(() => {
-      window.open(waUrl, "_blank", "noopener,noreferrer");
+      window.open(`https://wa.me/${adminNum}?text=${msg}`, "_blank", "noopener,noreferrer");
       setWaOpened(true);
     }, 1200);
     return () => clearTimeout(t);
@@ -77,53 +64,58 @@ export default function OrderConfirmation() {
     ? (() => {
         const adminNum = getAdminWhatsapp();
         if (!adminNum) return null;
-        const msg = buildAdminWhatsappMessage(order, order.order_items, format(order.amount_paid ?? 0));
-        return `https://wa.me/${adminNum}?text=${msg}`;
+        return `https://wa.me/${adminNum}?text=${buildAdminWhatsappMessage(order, order.order_items, format(order.amount_paid ?? 0))}`;
       })()
     : null;
+
+  const shortId = order ? order.id.slice(0, 8).toUpperCase() : "";
 
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
       <main className="flex-1 max-w-2xl mx-auto w-full px-4 sm:px-6 py-12">
+
         {/* Success header */}
         <div className="text-center mb-8 animate-fade-in">
           <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
             <CheckCircle className="w-10 h-10 text-green-600" />
           </div>
-          <h1 className="text-2xl font-bold mb-2">Order Placed!</h1>
+          <h1 className="text-2xl font-bold mb-2">Order Placed! 🎉</h1>
           <p className="text-muted-foreground">Thank you for your order. We'll be in touch shortly.</p>
-          {order && (
-            <p className="text-sm text-muted-foreground mt-1">
-              Order #{order.id.slice(0, 8).toUpperCase()}
-            </p>
-          )}
+          {order && <p className="text-sm text-muted-foreground mt-1 font-mono">Order #{shortId}</p>}
         </div>
 
-        {/* WhatsApp notification info */}
+        {/* ── WhatsApp marquee reminder ── */}
         {adminWhatsappUrl && (
-          <div className="mb-5 p-4 bg-green-50 border border-green-200 rounded-2xl flex items-start gap-3 animate-fade-in">
-            <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center shrink-0 mt-0.5">
-              <MessageCircle className="w-4 h-4 text-white" />
+          <div className="mb-5 overflow-hidden rounded-2xl border border-green-300 bg-green-50">
+            {/* Scrolling marquee text */}
+            <div className="bg-green-500 text-white text-xs font-semibold py-1.5 overflow-hidden whitespace-nowrap">
+              <div className="inline-block animate-marquee">
+                &nbsp;&nbsp;📲 Please send your order via WhatsApp manually if the window didn't open automatically — tap the green button below to send your order details directly to the store!&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;📲 Please send your order via WhatsApp manually if the window didn't open automatically — tap the green button below to send your order details directly to the store!&nbsp;&nbsp;
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-green-800">WhatsApp Notification Sent</p>
-              <p className="text-xs text-green-700 mt-0.5">
-                Your order details were sent to the store via WhatsApp.
-                {!waOpened && " If it didn't open automatically, tap the button below."}
-              </p>
-            </div>
-            {!waOpened && (
+
+            <div className="flex items-start gap-3 p-4">
+              <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center shrink-0 mt-0.5">
+                <MessageCircle className="w-4 h-4 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-green-800">WhatsApp Notification</p>
+                <p className="text-xs text-green-700 mt-0.5">
+                  Your order was automatically sent to the store via WhatsApp.
+                  If it didn't open, please tap the button below to send manually.
+                </p>
+              </div>
               <a
                 href={adminWhatsappUrl}
                 target="_blank"
                 rel="noreferrer"
                 onClick={() => setWaOpened(true)}
-                className="shrink-0 flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-100 hover:bg-green-200 px-3 py-1.5 rounded-lg transition-colors"
+                className="shrink-0 flex items-center gap-1 text-xs font-semibold text-white bg-green-500 hover:bg-green-600 px-3 py-1.5 rounded-lg transition-colors"
               >
                 Send <ExternalLink className="w-3 h-3" />
               </a>
-            )}
+            </div>
           </div>
         )}
 
@@ -139,9 +131,7 @@ export default function OrderConfirmation() {
                 <div key={item.id} className="flex justify-between items-center px-5 py-3">
                   <div>
                     <p className="text-sm font-medium">{item.product_title}</p>
-                    {item.variant_info && (
-                      <p className="text-xs text-muted-foreground">{item.variant_info}</p>
-                    )}
+                    {item.variant_info && <p className="text-xs text-muted-foreground">{item.variant_info}</p>}
                     <p className="text-xs text-muted-foreground">Qty: {item.quantity}</p>
                   </div>
                   <p className="text-sm font-bold text-brand">{format(item.price * item.quantity)}</p>
@@ -155,7 +145,7 @@ export default function OrderConfirmation() {
           </div>
         )}
 
-        {/* Customer info */}
+        {/* Delivery info */}
         {order && (
           <div className="bg-card rounded-2xl border border-border p-5 mb-6 space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Delivery Info</p>
@@ -167,7 +157,7 @@ export default function OrderConfirmation() {
           </div>
         )}
 
-        {/* Manual WhatsApp button fallback */}
+        {/* Manual WhatsApp send button */}
         {adminWhatsappUrl && (
           <a
             href={adminWhatsappUrl}
@@ -183,7 +173,7 @@ export default function OrderConfirmation() {
 
         {!adminWhatsappUrl && (
           <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-xl text-xs text-yellow-700">
-            <span className="font-semibold">Admin tip:</span> Add your WhatsApp number in Admin → Settings to enable automatic order notifications.
+            <span className="font-semibold">Admin tip:</span> Add your WhatsApp number in Admin → Settings to enable order notifications.
           </div>
         )}
 

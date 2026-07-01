@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Package, ShoppingBag, Tag, Settings, LogOut, X, Users, Truck } from "lucide-react";
+import { LayoutDashboard, Package, ShoppingBag, Tag, Settings, LogOut, X, Users, Truck, CreditCard } from "lucide-react";
 import { useAuth } from "@/stores/authStore";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ const navItems = [
   { icon: Tag, label: "Categories", href: "/admin/categories" },
   { icon: Users, label: "Users", href: "/admin/users" },
   { icon: Truck, label: "Delivery", href: "/admin/delivery" },
+  { icon: CreditCard, label: "Payments", href: "/admin/payments" },
   { icon: Settings, label: "Settings", href: "/admin/settings" },
 ];
 
